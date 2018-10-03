@@ -43,19 +43,19 @@ defmodule Mix.Tasks.Tilex.Hdb do
   end
 
   defp confirm(prompt) do
-    input = IO.gets(prompt <> " [YyNn] ")
+    input = IO.gets("#{prompt} [YyNn] ")
     "y" == input |> String.trim() |> String.downcase()
   end
 
   defp tmpfile() do
-    case System.cmd("mktemp", []) do
+    case System.cmd("mktemp", [], stderr_to_stdout: true) do
       {filename, 0} -> {:ok, String.trim(filename)}
       {out, status} -> {:error, {out, status}}
     end
   end
 
   defp fetch_heroku_dsn(heroku_app) do
-    {out, status} =
+    result =
       System.cmd(
         "heroku",
         [
@@ -66,12 +66,12 @@ defmodule Mix.Tasks.Tilex.Hdb do
           "--no-tty",
           "-x",
           "sh -c 'echo $DATABASE_URL'"
-        ]
+        ],
+        stderr_to_stdout: true
       )
 
-    case {String.trim(out), status} do
-      {"", _} -> {:error, :no_heroku_output}
-      {dsn, 0} -> {:ok, dsn}
+    case result do
+      {dsn, 0} -> {:ok, String.trim(dsn)}
       {out, status} -> {:error, {out, status}}
     end
   end
@@ -118,7 +118,7 @@ defmodule Mix.Tasks.Tilex.Hdb do
   defp pg_dump_to_file(config, filename) do
     args = pg_args(config, ["-f", filename, "--no-acl", "--no-owner"])
 
-    case System.cmd("pg_dump", args, env: pg_env(config)) do
+    case System.cmd("pg_dump", args, env: pg_env(config), stderr_to_stdout: true) do
       {_, 0} -> :ok
       {out, status} -> {:error, {out, status}}
     end
@@ -127,27 +127,50 @@ defmodule Mix.Tasks.Tilex.Hdb do
   defp psql_import(config, filename) do
     args = pg_args(config, ["-f", filename])
 
-    case System.cmd("psql", args, env: pg_env(config)) do
+    case System.cmd("psql", args, env: pg_env(config), stderr_to_stdout: true) do
       {_, 0} -> :ok
       {out, status} -> {:error, {out, status}}
     end
   end
 
+  defp exit_with_error(msg) do
+    Logger.error(msg)
+    Process.exit(self(), :normal)
+  end
+
+  defp check_cmd_error(_cmd_label, :ok), do: :ok
+  defp check_cmd_error(_cmd_label, {:ok, v}), do: v
+
+  defp check_cmd_error(cmd_label, {:error, {output, status}}) do
+    exit_with_error("`#{cmd_label}` failed with status #{status}\n\n#{output}")
+  end
+
   defp replace_local_db_with_heroku_db(heroku_app) do
-    {:ok, tmp} = tmpfile()
+    tmp = check_cmd_error("mktemp", tmpfile())
 
     try do
       Logger.info("Dumping Heroku app `#{heroku_app}` DB to #{tmp}...")
-      {:ok, dsn} = fetch_heroku_dsn(heroku_app)
-      {:ok, config} = parse_dsn(dsn)
-      :ok = pg_dump_to_file(config, tmp)
+
+      dsn = check_cmd_error("heroku run", fetch_heroku_dsn(heroku_app))
+
+      config =
+        case parse_dsn(dsn) do
+          {:ok, config} ->
+            config
+
+          {:error, :nomatch} ->
+            exit_with_error("Found invalid app DB DSN in Heroku: #{inspect(dsn)}")
+        end
+
+      check_cmd_error("pg_dump", pg_dump_to_file(config, tmp))
 
       Logger.info("Recreating local DB...")
       Mix.Task.run("ecto.drop")
       Mix.Task.run("ecto.create")
 
       Logger.info("Loading to local DB from #{tmp} ...")
-      :ok = psql_import(Tilex.Repo.config(), tmp)
+
+      check_cmd_error("psql", psql_import(Tilex.Repo.config(), tmp))
     after
       File.rm!(tmp)
     end
