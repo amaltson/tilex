@@ -47,8 +47,8 @@ defmodule Mix.Tasks.Tilex.Hdb do
     "y" == input |> String.trim() |> String.downcase()
   end
 
-  defp tmpfile(suffix) do
-    case System.cmd("mktemp", ["--suffix", suffix]) do
+  defp tmpfile() do
+    case System.cmd("mktemp", []) do
       {filename, 0} -> {:ok, String.trim(filename)}
       {out, status} -> {:error, {out, status}}
     end
@@ -134,7 +134,7 @@ defmodule Mix.Tasks.Tilex.Hdb do
   end
 
   defp replace_local_db_with_heroku_db(heroku_app) do
-    {:ok, tmp} = tmpfile(".sql")
+    {:ok, tmp} = tmpfile()
 
     try do
       Logger.info("Dumping Heroku app `#{heroku_app}` DB to #{tmp}...")
