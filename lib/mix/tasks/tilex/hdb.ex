@@ -48,7 +48,7 @@ defmodule Mix.Tasks.Tilex.Hdb do
   end
 
   defp tmpfile() do
-    case System.cmd("mktemp", [], stderr_to_stdout: true) do
+    case System.cmd("mktemp", []) do
       {filename, 0} -> {:ok, String.trim(filename)}
       {out, status} -> {:error, {out, status}}
     end
@@ -66,8 +66,7 @@ defmodule Mix.Tasks.Tilex.Hdb do
           "--no-tty",
           "-x",
           "sh -c 'echo $DATABASE_URL'"
-        ],
-        stderr_to_stdout: true
+        ]
       )
 
     case result do
@@ -118,7 +117,7 @@ defmodule Mix.Tasks.Tilex.Hdb do
   defp pg_dump_to_file(config, filename) do
     args = pg_args(config, ["-f", filename, "--no-acl", "--no-owner"])
 
-    case System.cmd("pg_dump", args, env: pg_env(config), stderr_to_stdout: true) do
+    case System.cmd("pg_dump", args, env: pg_env(config)) do
       {_, 0} -> :ok
       {out, status} -> {:error, {out, status}}
     end
@@ -127,7 +126,7 @@ defmodule Mix.Tasks.Tilex.Hdb do
   defp psql_import(config, filename) do
     args = pg_args(config, ["-f", filename])
 
-    case System.cmd("psql", args, env: pg_env(config), stderr_to_stdout: true) do
+    case System.cmd("psql", args, env: pg_env(config)) do
       {_, 0} -> :ok
       {out, status} -> {:error, {out, status}}
     end
